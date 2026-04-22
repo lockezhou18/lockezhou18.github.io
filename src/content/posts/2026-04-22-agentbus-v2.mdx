@@ -10,8 +10,6 @@ That worked, until we looked at what it was actually costing. When an agent read
 
 So we built something different: a message bus where coordination is just bytes on a wire, not LLM context.
 
-Sharing it here in case it's useful to someone working on something similar — and genuinely happy to hear what you think or take contributions if you're building in this space.
-
 ## The analogy that clarified it
 
 A web application speaks HTTP externally. Internally, it uses message queues, database connections, and in-process function calls — not HTTP. HTTP is the boundary protocol, not the operational fabric.
