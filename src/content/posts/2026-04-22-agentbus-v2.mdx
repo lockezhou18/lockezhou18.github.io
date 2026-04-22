@@ -78,6 +78,8 @@ Sessions expire after an hour of idle time — enough for a working session, sho
 
 ## Where it fits
 
+**vs. Discord / chat channels**: This is where we started. The original setup had agents coordinating through Discord — one agent would post to a channel, another would read it. The problem is that reading a channel means loading channel history into an LLM context window. Every coordination message costs tokens, and history grows. For anything beyond one-off messages, the token bill compounds fast. NATS messages are raw bytes — no LLM context involved in routing. Coordination cost drops to near zero.
+
 **vs. A2A**: A2A is the standard. AgentBus's NATS transport is faster for real-time messaging, but A2A has industry backing and will become the interop standard. The right long-term answer is to speak both: NATS internally, A2A HTTP at the boundary. That's the direction the project is heading.
 
 **vs. MCP**: Different layers. MCP gives Claude access to tools and resources. AgentBus lets multiple agents — Claude or otherwise — coordinate with each other. They're complementary: an agent uses MCP tools within its Claude session, and AgentBus for messaging between machines.
