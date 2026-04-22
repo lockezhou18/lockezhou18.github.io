@@ -4,9 +4,9 @@ date: 2026-04-22
 description: "We had persistent agents running on different machines and needed them to work together. We built a NATS-backed message bus. Then we found the theory."
 ---
 
-The project started with a practical problem: we had a few persistent agents running on different machines, and we needed them to communicate.
+The project started with a practical problem: we had persistent agents — Matthew, Eli, and a few others — running on different machines, and we needed them to communicate.
 
-Not "spin up an agent, use it, shut it down." We mean agents that stay alive — long-running processes that build context over time, respond to events, and coordinate on tasks. When you have those, the question becomes: how do they talk to each other?
+Not "spin up an agent, use it, shut it down." These are agents that stay alive — long-running processes that build context over time, respond to events, and coordinate on tasks. When you have those, the question becomes: how do they talk to each other?
 
 We tried a few things. HTTP worked until it didn't — standing up stable endpoints on every machine adds operational overhead, and Server-Sent Events only go one direction. Shared files are fine for state, but not for real-time messaging. We needed something built for pub/sub.
 
