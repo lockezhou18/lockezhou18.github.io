@@ -1,16 +1,16 @@
 ---
 title: "AgentBus: Building a Message Bus for Heterogeneous Agents"
 date: 2026-04-22
-description: "We had persistent agents running on different machines and needed them to work together. We built a NATS-backed message bus. Then we found the theory."
+description: "A side project: we had persistent agents on different machines, started coordinating through Discord, got burned by token costs, and built a NATS-backed message bus. Sharing it in case it helps."
 ---
 
-The project started with a practical problem: we had persistent agents — Matthew, Eli, and a few others — running on different machines, and we needed them to communicate.
+This is a personal side project. Sharing it here in case it's useful to someone working on something similar — and genuinely happy to hear what you think or take contributions if you're building in this space.
 
-Not "spin up an agent, use it, shut it down." These are agents that stay alive — long-running processes that build context over time, respond to events, and coordinate on tasks. When you have those, the question becomes: how do they talk to each other?
+The origin: we had a few persistent agents — Matthew, Eli, and a few others — running on different machines and coordinating on tasks. Not "spin up an agent, use it, shut it down." These agents stay alive, build context over time, and respond to events. When you have those, the first instinct is to wire them together through Discord.
 
-We tried a few things. HTTP worked until it didn't — standing up stable endpoints on every machine adds operational overhead, and Server-Sent Events only go one direction. Shared files are fine for state, but not for real-time messaging. We needed something built for pub/sub.
+That worked, until we looked at what it was actually costing. When an agent reads a Discord channel to know what happened, it loads that message history into an LLM context window. Every coordination message costs tokens. History grows. For anything beyond one-off exchanges, the token bill compounds fast — and you're not even doing real work yet, just routing.
 
-So we built AgentBus.
+So we built something different: a message bus where coordination is just bytes on a wire, not LLM context.
 
 ## The analogy that clarified it
 
@@ -78,8 +78,6 @@ Sessions expire after an hour of idle time — enough for a working session, sho
 
 ## Where it fits
 
-**vs. Discord / chat channels**: This is where we started. The original setup had agents coordinating through Discord — one agent would post to a channel, another would read it. The problem is that reading a channel means loading channel history into an LLM context window. Every coordination message costs tokens, and history grows. For anything beyond one-off messages, the token bill compounds fast. NATS messages are raw bytes — no LLM context involved in routing. Coordination cost drops to near zero.
-
 **vs. A2A**: A2A is the standard. AgentBus's NATS transport is faster for real-time messaging, but A2A has industry backing and will become the interop standard. The right long-term answer is to speak both: NATS internally, A2A HTTP at the boundary. That's the direction the project is heading.
 
 **vs. MCP**: Different layers. MCP gives Claude access to tools and resources. AgentBus lets multiple agents — Claude or otherwise — coordinate with each other. They're complementary: an agent uses MCP tools within its Claude session, and AgentBus for messaging between machines.
@@ -123,10 +121,14 @@ The other four patterns can run on top of it — an orchestrator that dispatches
 
 The clearest gap is the A2A gateway — a bridge that lets external A2A clients talk to agents on the bus without knowing about NATS, and lets bus agents call external A2A endpoints without writing HTTP clients.
 
-Beyond that: better agent discovery (right now it's JSON files on disk, which works for a small fleet), and the Level 3 autonomous mode for the Claude adapter — multi-round execution loops with checkpoints and rollback.
+Beyond that: better agent discovery (right now it's JSON files on disk, which works for a small fleet), and a Level 3 autonomous mode for the Claude adapter — multi-round execution loops with checkpoints and rollback.
 
-The repo is at [github.com/lockezhou18/agentbus-v2](https://github.com/lockezhou18/agentbus-v2). Pull requests and issues are welcome — this solves a problem that comes up any time you have agents on more than one machine, and there are almost certainly better approaches to parts of it that we haven't seen.
+---
+
+The repo is at [github.com/lockezhou18/agentbus-v2](https://github.com/lockezhou18/agentbus-v2).
 
 ```bash
 bash scripts/setup.sh --name my-agent --listen
 ```
+
+If you're running into the same problem — agents on multiple machines, Discord token costs piling up, HTTP endpoints that are annoying to maintain — I hope this is useful. If you see something that could be better, or you've solved a similar problem differently, I'd genuinely love to hear it. Issues and pull requests are welcome.
