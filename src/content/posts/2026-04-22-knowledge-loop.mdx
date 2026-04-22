@@ -1,0 +1,58 @@
+---
+title: "The Knowledge Loop: Four Skills for Making Work Compound"
+date: 2026-04-22
+description: "Every Claude session forgets everything. We built four skills to change that — research deeply, build with gates, capture what you learned, maintain what you know."
+---
+
+Every Claude session starts from zero. You close the window and it's gone — the context, the decisions, the things you figured out. Next time you hit the same problem, you solve it again.
+
+We ran into this enough that we built something to address it. Four skills that form a loop: research before you build, build with gates, capture what you learned after, and periodically maintain what you know. Each session feeds the next.
+
+We're sharing it here — [github.com/lockezhou18/claude-knowledge-loop](https://github.com/lockezhou18/claude-knowledge-loop) — in case it's useful to others working the same problem. Happy to hear what you think.
+
+## The four skills
+
+**`/research <topic>`** — Before building anything non-trivial, run this. It's a five-step inquiry cycle: define the real question (not always what you think it is), discover from primary sources, reconstruct the mechanism minimally, verify against the real running system, then synthesize. The outputs that matter most are "what surprised us" and "what we don't know" — those are where your mental model was wrong.
+
+**`/pipeline`** — A gated build pipeline that calls `/research` at stage 0 and `/compound` at stage 7 automatically. RESEARCH → PROPOSE → PLAN → BUILD → REVIEW → DEPLOY → VERIFY → COMPOUND. Each stage produces evidence before the next begins. Skips the pipeline entirely for trivial tasks.
+
+**`/compound`** — After finishing work, this scans what happened and suggests what to save: architecture decisions, surprising root causes, reusable patterns, things that failed and why. You approve each one. Notes are atomic, tagged, and linked — around 30+, patterns start emerging automatically.
+
+**`/compound-refresh`** — Run periodically. Audits your notes against current code, finds what's gone stale, suggests what to archive or update. Keeps the knowledge base accurate rather than just growing.
+
+## Why it compounds
+
+The reason is the aggregation rule in `/compound`: when 3+ notes share the same pattern, it suggests synthesizing them into a single pattern note. Episodic knowledge (what happened this time) becomes semantic knowledge (what's generally true). After enough sessions, `/research` starts surfacing relevant past work before you'd think to look.
+
+The knowledge base location is just files on disk — `~/knowledge/notes/`, `~/knowledge/sources/`. No database, no server. Start empty and it fills up naturally.
+
+## The v2 additions
+
+When we reviewed how we were actually using `/research`, two gaps stood out:
+
+**Reconstruct to understand.** Andrej Karpathy's "Zero to Hero" series made this concrete: if you can't rebuild something minimally, you haven't understood it. We added a RECONSTRUCT step — strip the topic to its essential mechanism and re-implement it in < 50 lines. It's not production code, it's a thinking tool. When you can trace through a concrete example by hand, you know you actually understand it.
+
+**Verify by probing the real system.** Papers claim things code doesn't implement. Docs lag behind reality. The VERIFY step operationalizes a discipline we'd started calling "gstack" after a colleague who wouldn't trust any claim without a live smoke test. Before asserting X works: demonstrate X works against the actual running system.
+
+## What it's built on
+
+We didn't invent the underlying ideas — we assembled them. The acknowledgments are in [ACKNOWLEDGMENTS.md](https://github.com/lockezhou18/claude-knowledge-loop/blob/main/ACKNOWLEDGMENTS.md), but the main intellectual lineage:
+
+**Niklas Luhmann's Zettelkasten** — Atomic notes with bidirectional links. The aggregation check (3+ notes → synthesize a pattern) is the mechanism by which episodic knowledge becomes semantic knowledge. Luhmann used this to write 70 books and 400 articles from a single slip-box.
+
+**Reflexion** (Shinn et al., 2023) — Verbal self-reflection as episodic memory for language agents. The insight that writing down what you tried and why is structurally more useful than just trying again.
+
+**Mem0** — Cross-agent shared memory with a 90% token reduction from structured retrieval over raw context. Informed the note schema and retrieval approach.
+
+**Andrej Karpathy** — The reconstruct-to-understand principle, added in v2.
+
+**Compound Engineering** (Kieran Klaassen / Every Inc.) — The name and the core framing that each unit of work should make subsequent units easier. Their [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) is worth reading alongside this.
+
+---
+
+If you're using Claude Code and hitting the same problem — sessions that forget, knowledge that doesn't carry forward — give it a try. And if something could be better, or you've approached this differently, I'd genuinely like to hear it.
+
+```bash
+git clone https://github.com/lockezhou18/claude-knowledge-loop.git
+cp -r claude-knowledge-loop/skills/* ~/.claude/commands/
+```
