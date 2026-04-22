@@ -4,8 +4,6 @@ date: 2026-04-22
 description: "A side project: we had persistent agents on different machines, started coordinating through Discord, got burned by token costs, and built a NATS-backed message bus. Sharing it in case it helps."
 ---
 
-This is a personal side project. Sharing it here in case it's useful to someone working on something similar — and genuinely happy to hear what you think or take contributions if you're building in this space.
-
 The origin: we had a few persistent agents — Matthew, Eli, and a few others — running on different machines and coordinating on tasks. Not "spin up an agent, use it, shut it down." These agents stay alive, build context over time, and respond to events. When you have those, the first instinct is to wire them together through Discord.
 
 That worked, until we looked at what it was actually costing. When an agent reads a Discord channel to know what happened, it loads that message history into an LLM context window. Every coordination message costs tokens. History grows. For anything beyond one-off exchanges, the token bill compounds fast — and you're not even doing real work yet, just routing.
