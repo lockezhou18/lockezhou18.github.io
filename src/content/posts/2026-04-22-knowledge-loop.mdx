@@ -32,7 +32,7 @@ When we reviewed how we were actually using `/research`, two gaps stood out:
 
 **Reconstruct to understand.** Andrej Karpathy's "Zero to Hero" series made this concrete: if you can't rebuild something minimally, you haven't understood it. We added a RECONSTRUCT step — strip the topic to its essential mechanism and re-implement it in < 50 lines. It's not production code, it's a thinking tool. When you can trace through a concrete example by hand, you know you actually understand it.
 
-**Verify by probing the real system.** Papers claim things code doesn't implement. Docs lag behind reality. The VERIFY step operationalizes a discipline we'd started calling "gstack" after a colleague who wouldn't trust any claim without a live smoke test. Before asserting X works: demonstrate X works against the actual running system.
+**Verify by probing the real system.** Papers claim things code doesn't implement. Docs lag behind reality. The VERIFY step comes from gstack's principle: *"don't trust a design without a real smoke-test."* Before asserting X works: demonstrate X works against the actual running system — curl the API, run the query, watch the logs.
 
 ## What it's built on
 
@@ -45,6 +45,8 @@ We didn't invent the underlying ideas — we assembled them. The acknowledgments
 **Mem0** — Cross-agent shared memory with a 90% token reduction from structured retrieval over raw context. Informed the note schema and retrieval approach.
 
 **Andrej Karpathy** — The reconstruct-to-understand principle, added in v2.
+
+**gstack** — *"Don't trust a design without a real smoke-test."* The verification-first engineering discipline that became the VERIFY step in v2.
 
 **Compound Engineering** (Kieran Klaassen / Every Inc.) — The name and the core framing that each unit of work should make subsequent units easier. Their [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) is worth reading alongside this.
 
