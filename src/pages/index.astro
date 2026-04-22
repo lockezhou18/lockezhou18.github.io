@@ -1,0 +1,147 @@
+---
+import { getCollection } from "astro:content";
+
+const posts = (await getCollection("posts")).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf()
+);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Notes on building AI infrastructure and systems." />
+    <title>lockezhou18</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --color-bg: #ffffff;
+        --color-text: #171717;
+        --color-muted: #737373;
+        --color-border: #e5e5e5;
+        --font-sans: "Inter", system-ui, sans-serif;
+        --font-serif: "Playfair Display", Georgia, serif;
+      }
+
+      html { background: var(--color-bg); color: var(--color-text); }
+      body { font-family: var(--font-sans); font-size: 1rem; line-height: 1.75; }
+
+      .site-header {
+        border-bottom: 1px solid var(--color-border);
+        padding: 1rem 1.5rem;
+      }
+      .site-header nav {
+        max-width: 680px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .logo {
+        font-family: var(--font-serif);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--color-text);
+        text-decoration: none;
+      }
+      .github-link {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        text-decoration: none;
+      }
+      .github-link:hover { color: var(--color-text); }
+
+      .container {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 3rem 1.5rem 6rem;
+      }
+
+      .intro {
+        margin-bottom: 3rem;
+      }
+      .intro p {
+        color: var(--color-muted);
+        font-size: 1rem;
+        margin-top: 0.5rem;
+      }
+
+      .post-list {
+        list-style: none;
+        padding: 0;
+      }
+      .post-item {
+        padding: 1.5rem 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .post-item:first-child {
+        border-top: 1px solid var(--color-border);
+      }
+      .post-date {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 0.4rem;
+      }
+      .post-title {
+        font-family: var(--font-serif);
+        font-size: 1.25rem;
+        font-weight: 700;
+        line-height: 1.3;
+        margin-bottom: 0.4rem;
+      }
+      .post-title a {
+        color: var(--color-text);
+        text-decoration: none;
+      }
+      .post-title a:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .post-description {
+        font-size: 0.9375rem;
+        color: var(--color-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <nav>
+        <span class="logo">lockezhou18</span>
+        <a href="https://github.com/lockezhou18" class="github-link">github.com/lockezhou18 →</a>
+      </nav>
+    </header>
+    <main class="container">
+      <div class="intro">
+        <p>Notes on building AI infrastructure, agents, and the systems underneath.</p>
+      </div>
+      <ul class="post-list">
+        {posts.map((post) => {
+          const formatted = post.data.date.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          });
+          return (
+            <li class="post-item">
+              <p class="post-date">{formatted}</p>
+              <h2 class="post-title">
+                <a href={`/${post.slug}`}>{post.data.title}</a>
+              </h2>
+              <p class="post-description">{post.data.description}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "lockezhou18-blog",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.7.0",
+    "@astrojs/mdx": "^4.2.0"
+  }
+}

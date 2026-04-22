@@ -1,0 +1,130 @@
+---
+title: "AgentBus: Building a Message Bus for Heterogeneous Agents"
+date: 2026-04-22
+description: "We had persistent agents running on different machines and needed them to work together. We built a NATS-backed message bus. Then we found the theory."
+---
+
+The project started with a practical problem: we had a few persistent agents running on different machines, and we needed them to communicate.
+
+Not "spin up an agent, use it, shut it down." We mean agents that stay alive — long-running processes that build context over time, respond to events, and coordinate on tasks. When you have those, the question becomes: how do they talk to each other?
+
+We tried a few things. HTTP worked until it didn't — standing up stable endpoints on every machine adds operational overhead, and Server-Sent Events only go one direction. Shared files are fine for state, but not for real-time messaging. We needed something built for pub/sub.
+
+So we built AgentBus.
+
+## The analogy that clarified it
+
+A web application speaks HTTP externally. Internally, it uses message queues, database connections, and in-process function calls — not HTTP. HTTP is the boundary protocol, not the operational fabric.
+
+After building, we found that Anthropic's multi-agent coordination patterns [describe the same idea](https://claude.com/blog/multi-agent-coordination-patterns): A2A is the right answer for how agents present themselves to the outside world and interop with agents they don't control. The gap we were filling is different — how agents on your own infrastructure actually coordinate at runtime.
+
+## What we built
+
+AgentBus is a NATS-backed message bus for cross-machine agent coordination. NATS internally for speed and real-time messaging. A2A-compatible externally so any A2A client can call your agents, and your agents can call any A2A endpoint.
+
+```
+                        ┌─ NATS (internal, fast) ──┐
+Machine A (sender)  ────┤                           ├──── Machine B (listener)
+  agentbus send         └─ A2A HTTP (external) ─────┘       agentbus listen
+```
+
+## Why NATS?
+
+A2A over HTTP has a latency and ergonomics problem for real-time coordination.
+
+A2A's streaming story is Server-Sent Events — one direction, HTTP-based, requires an HTTP server on the listener side. For an agent running on a machine that spins up on demand, standing up an HTTP server with a stable public endpoint is operational overhead that adds nothing.
+
+NATS gives you:
+- Sub-millisecond pub/sub with wildcard subjects (`agent.*.inbox`, `event.result.>`)
+- Bidirectional by default — both sides can publish and subscribe
+- Request/reply built in (correlation IDs, reply subjects, timeouts)
+- No server required on the agent side — agents connect out to NATS, not the reverse
+
+So sending a task from one machine to an agent on another looks like this:
+
+```bash
+agentbus send --to vm-agent --command "pytest tests/ -x"
+# ← stdout arrives in real-time
+# all 47 tests passed in 3.2s
+```
+
+No HTTP server running on the remote machine. No ngrok. No port forwarding.
+
+## The Guardian layer
+
+Before any message reaches a handler, it passes through Guardian — the security and validation layer.
+
+Three things Guardian does:
+
+**Schema validation.** Every message conforms to the AgentBus envelope schema: `from`, `to`, `message_type`, `correlation_id`, `payload`. Messages that don't parse get dropped.
+
+**ACLs.** Agent cards define which agents can send to which subjects. An agent that should only accept commands from trusted senders can enforce that at the message layer before any code runs.
+
+**Prompt injection detection.** When you have agents dispatching messages to Claude, an adversary who can influence the message content can inject instructions. Guardian runs basic injection detection on incoming message text before it reaches the Claude adapter. None of this is foolproof, but it raises the floor over "accept everything and hope the LLM notices."
+
+## The Claude adapter
+
+The listener has three dispatch modes:
+
+| Mode | How |
+|------|-----|
+| Shell | `bash -c "<command>"` — Claude not involved |
+| One-shot | `claude -p "<message>"` — stateless |
+| Session resume | `claude -p --resume <session-id>` — stateful |
+
+Session resume is the interesting one. Sessions are keyed by `{sender}:{repo}`, so when one agent sends a follow-up message about the same codebase, the receiving agent automatically resumes the prior Claude session. You get persistent context without managing conversation state yourself.
+
+Sessions expire after an hour of idle time — enough for a working session, short enough that they don't accumulate indefinitely.
+
+## Where it fits
+
+**vs. A2A**: A2A is the standard. AgentBus's NATS transport is faster for real-time messaging, but A2A has industry backing and will become the interop standard. The right long-term answer is to speak both: NATS internally, A2A HTTP at the boundary. That's the direction the project is heading.
+
+**vs. MCP**: Different layers. MCP gives Claude access to tools and resources. AgentBus lets multiple agents — Claude or otherwise — coordinate with each other. They're complementary: an agent uses MCP tools within its Claude session, and AgentBus for messaging between machines.
+
+**vs. Claude Agent Teams**: Agent Teams is Anthropic's native multi-agent story and will eventually be the right answer when it supports remote teammates. Today it's same-machine, Claude-only. AgentBus fills the gap for cross-machine coordination and heterogeneous agents.
+
+**vs. AutoGen/CrewAI/LangGraph**: These are frameworks for defining agent behavior. AgentBus is transport infrastructure. They don't compete.
+
+## The `--on-message` hook
+
+One design choice: any process can be an agent.
+
+```bash
+agentbus listen --agent my-agent \
+  --on-message './handle.sh'
+```
+
+The hook receives JSON on stdin. Its stdout becomes the reply. That's the contract.
+
+A shell script, a Python script, a compiled binary, a curl call to an external API — the bus doesn't care what's on the other end as long as it can read stdin and write stdout. "Heterogeneous" in a real sense, not just "any OpenAI-compatible model."
+
+## Finding the theory after building the thing
+
+After we shipped the initial version, we found Anthropic's [five multi-agent coordination patterns](https://claude.com/blog/multi-agent-coordination-patterns): Generator-Verifier, Orchestrator-Subagent, Agent Teams, Message Bus, and Shared State.
+
+AgentBus implements **Pattern 4: Message Bus**. What's interesting is the mapping:
+
+| Pattern | Anthropic native primitive | Gap |
+|---|---|---|
+| Generator-Verifier | Subagents | In-session only |
+| Orchestrator-Subagent | Subagents / Managed Agents | Same-session |
+| Agent Teams | Claude Code Agent Teams | Same-machine only |
+| **Message Bus** | **None** | **No native primitive** |
+| Shared State | CLAUDE.md + memory files | Single-machine |
+
+Pattern 4 is the only one with no native Anthropic primitive. That's the gap AgentBus fills — not because the other patterns are wrong, but because Anthropic's patterns describe application-layer behavior and assume the infrastructure already exists. AgentBus is that infrastructure.
+
+The other four patterns can run on top of it — an orchestrator that dispatches subtasks via NATS subjects, or agent teams that share a subject namespace for coordination. The bus is substrate, not a pattern choice.
+
+## What's next
+
+The clearest gap is the A2A gateway — a bridge that lets external A2A clients talk to agents on the bus without knowing about NATS, and lets bus agents call external A2A endpoints without writing HTTP clients.
+
+Beyond that: better agent discovery (right now it's JSON files on disk, which works for a small fleet), and the Level 3 autonomous mode for the Claude adapter — multi-round execution loops with checkpoints and rollback.
+
+The repo is at [github.com/lockezhou18/agentbus-v2](https://github.com/lockezhou18/agentbus-v2). Pull requests and issues are welcome — this solves a problem that comes up any time you have agents on more than one machine, and there are almost certainly better approaches to parts of it that we haven't seen.
+
+```bash
+bash scripts/setup.sh --name my-agent --listen
+```
