@@ -139,6 +139,13 @@ const formatted = date.toLocaleDateString("en-US", {
       .prose thead { background: var(--color-code-bg); }
       .prose th { font-weight: 600; }
       .prose tr:nth-child(even) td { background: #f6f8fa; }
+
+      .comments {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem 4rem;
+        border-top: 1px solid var(--color-border);
+      }
     </style>
   </head>
   <body>
@@ -156,5 +163,22 @@ const formatted = date.toLocaleDateString("en-US", {
         <slot />
       </div>
     </article>
+    <div class="comments">
+      <script src="https://giscus.app/client.js"
+        data-repo="lockezhou18/lockezhou18.github.io"
+        data-repo-id="R_kgDOSJ2Cig"
+        data-category="General"
+        data-category-id="DIC_kwDOSJ2Cis4C7crr"
+        data-mapping="pathname"
+        data-strict="0"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="light"
+        data-lang="en"
+        crossorigin="anonymous"
+        async>
+      </script>
+    </div>
   </body>
 </html>
