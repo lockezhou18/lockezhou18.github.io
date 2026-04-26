@@ -1,376 +1,796 @@
 ---
 title: "Capability Mediation for Personal AI Agents"
 date: 2026-04-26T10:00:00-07:00
-description: "A field report from building a secure MCP gateway over private state — why, how, and what it cost vs. raw tools."
+description: "A field report from building and testing a secure MCP gateway over private state — why, how, what worked, what surprised us, and what's next."
 ---
 
-*A field report from building a secure MCP gateway over private state.*
+This is a field report from a running experiment, not a finished system.
 
-This is an experiment report, not a finished system.
+The system runs on a Mac mini under my desk. It serves a handful of personal agents I trust enough to read selected financial signals, GitHub activity, research feeds, social bookmarks, and market calendars — but not enough to hand a credit card to.
 
-The thing it describes is running on a Mac mini under my desk and serves a handful of personal agents I trust enough to read selected financial signals, GitHub activity, research feeds, and market calendars — but not enough to hand a credit card to.
+The rough edges are still visible. Some sources are live. Some are stubbed. Some return too much content. Some need better filters. The system is useful, but not finished.
 
-It is in flight. The rough edges are visible from orbit. The parts I would ship to someone else are smaller than the parts I would rewrite.
-
-I am writing now, while it is still in flight, because one design choice has turned out to matter more than I expected:
+I am writing this because one design choice has turned out to matter more than expected:
 
 > Mediate capabilities, not tools.
 
-That sentence sounds abstract, but the practical difference is sharp.
+A tool says:
 
-A tool says: "Here is an API. Call it correctly."
+> “Here is an API. Call it correctly.”
 
-A capability says: "Here is a bounded kind of action you are allowed to perform, over a bounded kind of state, with observable behavior, revocable access, and a uniform contract."
+A capability says:
+
+> “Here is a bounded kind of action you are allowed to perform, over a bounded kind of state, with observable behavior, revocable access, and a uniform contract.”
 
 That shift changed how the system felt to build, debug, and trust.
 
+The experiment tested a narrow claim:
+
+> A capability-mediated gateway can reduce structural friction for personal agents operating over private, partially available, multi-source state.
+
+It did not test whether agents can trade autonomously. It did not test whether a model can become a financial advisor. It tested something lower-level and more infrastructural: whether agents can compose across messy personal data sources through a smaller, safer, more observable interface.
+
 ---
 
-## Why we built it
+## Motivation
 
-The lived problem is small and concrete.
+The problem is concrete.
 
-I have personal data that I would love an agent to actually use: brokerage signals, earnings calendars, FOMC dates, GitHub repos I follow, public filings, research papers from Anthropic and OpenAI, selected timelines and newsletters, and a few local knowledge stores.
+I have personal data that I would like agents to use:
 
-None of that data is trivial.
+- financial calendars
+- earnings events
+- public filings
+- insider transaction signals
+- GitHub activity
+- AI research feeds
+- social bookmarks
+- selected local knowledge stores
+- source health and diagnostic state
 
-Some of it is public but noisy. Some of it is private but useful. Some of it is stale unless refreshed. Some of it should be readable but never writable. Some of it should be discoverable only if the agent already has the right scope.
+None of this data is trivial.
 
-The obvious approach is to give agents tools — one per provider, one per API. That works for demos. It degrades in real use.
+Some is public but noisy. Some is private but useful. Some is stale unless refreshed. Some should be readable but never writable. Some should be discoverable only if the agent already has the right scope.
 
-Every new tool brings a new schema, a new auth story, a new error surface, a new freshness model, and a new way for agents to hallucinate what the tool can do. The agent ends up reasoning about API topology as much as it reasons about the user's actual task.
+The obvious approach is to give agents more tools:
+
+- a brokerage API tool
+- an earnings-calendar tool
+- a filing-search tool
+- a GitHub tool
+- an X / social tool
+- a paper-search tool
+- a web-search tool
+- a database tool
+
+That works for demos. It degrades in real use.
+
+Every new tool brings a new schema, a new auth story, a new freshness model, a new error surface, and a new way for the agent to misunderstand what the tool can do.
+
+The agent is no longer just reasoning about the user’s task. It is also reasoning about API topology.
 
 That is the wrong cognitive load.
 
-The experiment was to put a narrow gateway between agents and private state. Not a tool zoo. Not a god-mode backend. A capability-mediated layer.
+The experiment was to put a narrow gateway between agents and private state: not a general tool zoo, not a god-mode backend, but a capability-mediated gateway.
 
-The agent should not need to know whether a fact came from OpenBB, GitHub, a local SQLite index, or a calendar feed. It should know what source exists, what capabilities are allowed, how fresh the result is, how to resolve an item, and whether a source is unavailable because of missing credentials or a real failure.
+The gateway owns the messy part.
 
-The gateway owns the messy part. The agent owns the planning.
+The agent owns the planning.
 
 ---
 
-## The core design
+## Research Questions
 
-The system is built around a uniform `Item` envelope.
+This experiment was organized around three questions.
 
-Every source returns items with the same basic shape:
+### 1. Can a small uniform capability surface replace a growing set of bespoke tools?
 
-```ts
-type Item = {
-  source: string
-  source_id: string
-  kind: string
-  title?: string
-  url?: string
-  uri?: string                 // server-populated
-  created_at: string
-  seen_at: string
-  tags: string[]
-  content: Record<string, unknown>
-}
-```
+Instead of giving agents separate tools for filings, earnings, FOMC calendars, GitHub activity, research feeds, and bookmarks, can the system expose one shared retrieval grammar?
 
-The exact content fields vary by source, but the contract does not.
+### 2. Does a uniform `Item` envelope make cross-source composition easier?
 
-A GitHub issue, an earnings event, a Form 4 filing, a research paper, a social bookmark, a calendar event, or a gateway health record all move through the same retrieval surface.
+If every source returns the same basic shape, can the agent compose unrelated records without source-specific glue code?
 
-The public capability surface is intentionally small:
+### 3. Does exposing diagnostics as a first-class source improve behavior under partial failure?
+
+If source health, missing credentials, stale data, and stubbed adapters are visible to the agent, does the agent degrade more gracefully instead of guessing or failing opaquely?
+
+---
+
+## Hypotheses
+
+The experiment tested three practical hypotheses.
+
+**H1: Uniform capability grammar reduces source-specific prompt and tool complexity.**
+
+Agents should be able to use the same retrieval workflow across finance, GitHub, research, social, and gateway diagnostics.
+
+**H2: A shared `Item` envelope improves cross-source composition.**
+
+Agents should be able to combine records from different sources when those records share common fields such as `source`, `title`, `summary`, `uri`, `created_at`, `updated_at`, `available`, and `reason`.
+
+**H3: Agent-readable diagnostics improve partial-failure behavior.**
+
+Agents should respond better to unavailable sources when missing credentials, stale sync, and stubbed adapters are represented as explicit state rather than provider-specific exceptions.
+
+---
+
+## Experimental Setup
+
+The gateway runs locally and exposes an MCP-compatible interface to a small set of personal agents.
+
+The deployment has three layers.
+
+### 1. Agent layer
+
+Personal agents connect to the gateway through MCP tools and resources.
+
+They are not given provider-specific API documentation. They discover sources through `gateway.health` and operate through the shared capability surface.
+
+### 2. Capability gateway
+
+The gateway owns:
+
+- source discovery
+- authorization and scope checks
+- source health
+- item normalization
+- URI resolution
+- freshness metadata
+- unavailable-source reporting
+
+The public surface is intentionally small:
 
 ```text
-recent(source, n, since?, until?)
-search(query, source?, since?)
+recent(source, n)
+search(source, query)
 resolve(uri)
 fresh_pull(source)
 resources/read(source://<name>/<id>)
 resources/subscribe(source://<name>/<id>)
 ```
 
-Agents discover sources through `gateway.health`, then use the same retrieval grammar everywhere else.
+### 3. Source adapters
 
-```text
-recent("gateway.health", n=100)     # what is available right now?
-recent("fin.fomc", n=10)            # upcoming FOMC meetings
-recent("fin.earnings", n=20)        # upcoming earnings window
-recent("fin.insider", n=10)         # recent Form 4 filings
-recent("x.watched", n=30)           # latest posts from watched accounts
-```
+Provider-specific adapters fetch or index records from finance, GitHub, research, social, local files, and diagnostic sources.
 
-The important part is not that these are clever tools. They are not.
+Each adapter normalizes provider-specific records into the shared `Item` envelope.
 
-The important part is that the tools are boring, uniform, and capability-scoped.
+The experiment focused on read-heavy workflows: summarize, compare, retrieve, explain, and monitor. It did not allow autonomous high-risk execution such as trading, payments, account transfers, or credential mutation.
 
-A source can be live, stubbed, stale, or missing credentials without becoming an exception-shaped surprise. The health record looks like:
+---
 
-```json
-{
-  "source": "your.broker.balance",
-  "available": false,
-  "reason": "credential 'env:YOUR_API_KEY' not found"
+## Intervention: The Uniform `Item` Envelope
+
+The main intervention was to normalize unrelated source records into one shared shape:
+
+```ts
+type Item = {
+  id: string
+  source: string
+  title: string
+  summary?: string
+  uri: string
+  created_at?: string
+  updated_at?: string
+  metadata?: Record<string, unknown>
+  available?: boolean
+  reason?: string
 }
 ```
 
-That means the agent sees "configure me" instead of "the world exploded."
+The same envelope can represent:
 
-For personal agents, broken partial state is the normal state. The system has to make partial availability legible.
+- an earnings event
+- an FOMC calendar item
+- an insider filing
+- a GitHub release
+- a research paper
+- a social bookmark
+- a gateway health record
+- a stubbed source
+- an unavailable credential-backed source
+
+The goal was not to erase source differences. Earnings events, Form 4 filings, GitHub releases, and social posts still mean different things.
+
+The goal was to make retrieval and planning boring enough that agents could compose across sources without custom glue.
 
 ---
 
-## What we actually tested
+## Source Inventory
 
-I ran five real cross-source queries against the live gateway. The first was the one that motivated this whole post; the next four push harder by mixing personal cash position, calendar primitives, and social signals.
+At the time of the test, the gateway had 23 registered sources across multiple personal-data domains.
 
-### Case 1: the original query
+Representative sources:
 
-Late one night, working through a position-sizing question, I asked:
+| Domain | Source | Status | Capabilities | Notes |
+|---|---|---:|---|---|
+| Finance | `fin.fomc` | live | `recent`, `search` | Macro calendar anchor |
+| Finance | `fin.earnings` | live | `recent`, `search` | Upcoming earnings windows |
+| Finance | `fin.insider` | live | `recent`, `search`, `resolve` | Insider filing / Form 4 signals |
+| Finance | `fin.filings` | live | `recent`, `search`, `resolve` | EDGAR filings |
+| Finance | `coinbase.position` | stubbed | none | Missing credentials |
+| Finance | `fidelity.balance` | stubbed | none | Missing credentials |
+| Social | `x.watched` | live | `recent`, `search` | Watched-account posts |
+| Social | `x.bookmarks` | live | `recent`, `search` | Saved posts |
+| Social | `xhs.bookmarks` | live | `recent`, `search` | Xiaohongshu bookmarks |
+| GitHub | `github.releases` | live | `recent`, `search`, `resolve` | Release activity |
+| Research | `anthropic.research` | live | `recent`, `search`, `resolve` | Anthropic research / posts |
+| Research | `openai.research` | live | `recent`, `search`, `resolve` | OpenAI research / posts |
+| Gateway | `gateway.health` | live | `recent` | Source discovery and diagnostics |
 
-> *"I have $20k cash. Looking at the next 14 days of earnings plus the FOMC meeting on the 29th, when's the lowest-vol-risk week to enter a new position?"*
+The exact list matters less than the representation.
 
-The agent composed an answer from `fin.fomc`, `fin.earnings`, and `fin.insider` — all reachable through the same tools, the same `Item` shape, and the same scope grammar.
+Live, stale, stubbed, and unavailable sources all appear through the same discovery and item model.
 
-It returned a windowed calendar:
+A stubbed source can surface as:
 
-```text
-Apr 29 (Wed)   FOMC + MSFT/GOOGL/AMZN/META   HARD BLOCK — vol cluster
-Apr 30 (Thu)   AAPL earnings                 HARD BLOCK
-May 1 (Fri)                                  CLEAR
-May 5 (Tue)    AMD earnings                  HARD BLOCK
-May 6 (Wed)                                  CLEAR — first fully clean day
-May 7–8                                      CLEAR through May 12
+```json
+{
+  "source": "fidelity.balance",
+  "available": false,
+  "reason": "credential_not_found"
+}
 ```
 
-Recommendation: enter May 6–8, after FOMC and the surrounding mega-cap earnings cluster clear.
-
-This is the kind of result I wanted the system to make possible: not a bot calling a finance API, and not a single-purpose workflow hardcoded around one provider, but an agent composing private state, public market calendars, and bounded access into one answer.
-
-### Cases 2–5: harder cross-source compositions
-
-The four follow-on tests added social signals to the mix — the hardest case for the `Item` envelope, because tweet JSON and Form 4 XML have almost nothing structurally in common.
-
-**Case 2 — Personal position + watched X accounts + FOMC sentiment.** *"What are the people I follow on X actually saying about the Fed right now?"* The agent composed `x.watched` + `fin.fomc` + `fin.earnings`. The interesting finding was the *absence* of signal: of 22 recent posts from watched accounts, nobody was talking about the Fed at all. That silence is itself a read. Verdict: wait, deploy at most $5k now; preserve cash optionality through the Apr 29 vol cluster.
-
-**Case 3 — Bookmarks + insider buying.** *"Of the stocks I've been bookmarking on X, which ones also have officer/director buying?"* The agent composed `x.bookmarks` + `fin.insider`, with an explicit `search("BUY", source="fin.insider")` returning `[]`. **Double null:** zero tradeable tickers in 30 bookmarks, zero buy-side insider filings in 25 Form 4s. Verdict: hold the capital. The clean negative confirmation matters — in a tool-zoo agent, "couldn't find anything" is hard to distinguish from "didn't look hard enough."
-
-**Case 4 — Research catalyst timing.** *"Where's the cleanest 3-day window to deploy on AI-momentum without overlapping a vol event?"* The agent composed `anthropic.research` + `openai.research` + `github.releases` + `fin.fomc` + `fin.earnings`. Same May 6–8 answer as case 1, by a different reasoning path. Independent convergence is a small validation.
-
-**Case 5 — Cross-platform thesis surfacing.** *"What thesis am I implicitly building from a month of X and Xiaohongshu bookmarks?"* The agent composed `x.bookmarks` + `xhs.bookmarks` + `fin.insider` + `fin.filings`. The honest read: about 70% of my bookmarks are agent-tooling and meta-engineering. The bookmarks describe a *builder* thesis, not an *investor* thesis. Forcing a mapping onto GOOGL/META/AMZN would be fabrication, especially with insiders selling those names. Verdict: hold the capital.
-
-Three of five cases declined to fully deploy the $20k (case 2 partial, cases 3 and 5 full hold). To be unambiguous: that is the agent declining to spend, not the agent declining to trust the gateway. The gateway is what made the negative results legible in the first place.
-
-### What it cost vs. raw tools
-
-I tracked tool calls and approximate input tokens for each query (counted from the gateway's actual response payloads), then estimated the native equivalent by summing typical raw provider payload sizes for the same data — uncapped X tweet objects with expanded entities, full SEC EDGAR Form 4 XML, full Anthropic/OpenAI blog HTML, OpenBB earnings dicts, plus the per-client tool-definition footprint each one would carry in agent context. The native bounds widen when raw payloads are larger than expected.
-
-| # | Test case | Calls | Gateway tokens | Native tokens (est.) | Reduction |
-|---|---|---:|---:|---:|---:|
-| 1 | Cash + earnings + FOMC | 4 | ~12,500 | ~85,000–100,000 | ~7× |
-| 2 | Cash + watched X + FOMC | 4 | ~12,000 | ~80,000–150,000 | ~7–12× |
-| 3 | Cash + bookmarks + insider | 4 | ~22,000 | ~88,000–132,000 | ~4–6× |
-| 4 | Cash + research + calendar | 6 | ~22,000 | ~88,000–110,000 | ~4–5× |
-| 5 | Cash + cross-platform thesis | 5 | ~28,000 | ~85,000–140,000 | ~3–5× |
-
-Twenty-three calls across five questions. **~96,500** input tokens through the gateway versus an estimated **~430,000–630,000** native — roughly **5–7× fewer agent-context tokens for the same answer**.
-
-That is the agent-side cost. The gateway doesn't make data appear from nowhere — someone has to fetch from the providers. The shift is moving that cost out of the agent's context window (where every token is paid for in inference cost, repeated per query) and into a cron run (where it's amortized across every read of the snapshot).
-
-The savings come from three layers:
-
-1. **Content normalization.** Anthropic blog posts go from 15–25KB raw HTML to ~600 tokens after a 2000-char per-field cap. A Form 4 XML filing goes from 5–8KB to ~600 tokens. Oversize dicts (full GitHub release API responses) get replaced with `{_truncated: true, _original_size_chars: N}` stubs.
-2. **Schema collapse.** Five distinct provider schemas — X tweet JSON, EDGAR Form 4 XML, OpenBB earnings dicts, Anthropic blog HTML, FOMC calendar — become one `Item` shape. Tool definitions in agent context drop from ~1,500–6,000 tokens to ~250.
-3. **Snapshot serving.** Most reads come from a pre-built `signals.jsonl` written once by an upstream cron, not live API calls. The agent doesn't pay provider rate limits or paid-tier per-call costs.
-
-That last layer matters most for sources behind paid or rate-limited APIs. An agent doing 20 cross-source queries a day would burn most of an X API Basic tier ($200/mo) hitting bookmark and timeline endpoints directly. Through the gateway, the per-query API cost is ~0 — the cron pulls every 15 min and serves all subsequent reads for free.
-
-The gateway pays a small fixed cost (cron CPU, ~250 tokens of tool definition, snapshot storage) to amortize a large variable cost (per-query API hits, schema parsing, raw payload tokens). The break-even point is around the second cross-source query in a session.
+That means the agent sees “configure me” instead of an opaque failure.
 
 ---
 
-## Why not just expose tools?
+## Task Suite
 
-The standard answer is: "Just give the agent tools and let it decide."
+I tested the gateway against five live workflows on April 25, 2026.
 
-I tried that. It works for demos. It degrades in real use.
+The tasks were practical rather than academic. They were designed to test cross-source composition, null-result handling, token cost, and partial availability.
 
-The problem is not that agents cannot call tools. They can.
+| # | Task | Sources Needed | Expected Behavior |
+|---|---|---|---|
+| 1 | Cash + 14-day earnings + FOMC | `fin.fomc`, `fin.earnings`, `fin.insider`, `gateway.health` | Find a lower-volatility entry window |
+| 2 | Cash + watched X accounts + FOMC | `x.watched`, `fin.fomc`, `fin.earnings`, `gateway.health` | Combine social sentiment with calendar risk |
+| 3 | Cash + X bookmarks + insider Form 4 | `x.bookmarks`, `fin.insider`, `gateway.health` | Check whether bookmarked themes map to insider buying |
+| 4 | AI research/releases + FOMC + earnings | `anthropic.research`, `openai.research`, `github.releases`, `fin.fomc`, `fin.earnings`, `gateway.health` | Find a clean AI-momentum window |
+| 5 | Cross-platform bookmarks + insider + filings | `x.bookmarks`, `xhs.bookmarks`, `fin.insider`, `fin.filings`, `gateway.health` | Infer whether bookmarks imply an investable thesis |
 
-The problem is that tool exposure shifts too much trust to the least stable layer of the system.
+Each case recorded:
+
+- prompt
+- sources composed
+- gateway calls
+- gateway token cost
+- estimated native token cost
+- result
+- observed friction
+
+---
+
+## Evaluation: Five Live Gateway Runs
+
+The goal was not to benchmark model intelligence.
+
+The goal was to test whether the gateway made multi-source personal-agent workflows cheaper, more legible, and easier to compose than calling each provider API directly.
+
+Each test used the same gateway surface:
+
+```text
+recent(source, n)
+search(source, query)
+resolve(uri)
+gateway.health
+```
+
+### Summary
+
+| # | Test case | Sources composed | Gateway calls | Gateway tokens | Native tokens, estimated | Reduction | Result |
+|---|---|---:|---:|---:|---:|---:|---|
+| 1 | Cash + 14-day earnings + FOMC | 4 | 4 | ~12.5k | ~85k–100k | ~7× | Enter May 6–8 |
+| 2 | Cash + watched X accounts + FOMC | 4 | 4 | ~12k | ~80k–150k | ~7–12× | Wait; deploy at most $5k |
+| 3 | Cash + X bookmarks + insider Form 4 | 3 | 4 | ~22k | ~88k–132k | ~4–6× | Hold capital |
+| 4 | AI research/releases + FOMC + earnings | 6 | 6 | ~22k | ~88k–110k | ~4–5× | Enter May 6–8 |
+| 5 | Cross-platform bookmarks + insider + filings | 5 | 5 | ~28k | ~85k–140k | ~3–5× | Hold capital |
+
+Across the five cases, the gateway handled **23 calls** and used about **96.5k input tokens**.
+
+The estimated native path would have used about **430k–630k tokens**, depending on provider payload size and schema overhead.
+
+The observed reduction was roughly **5–7×**.
+
+The savings came from three places:
+
+1. large content fields were capped and marked with `_truncated: true`
+2. provider-specific schemas were normalized into one `Item` envelope
+3. provider API calls were moved out of the agent loop and into scheduled snapshots
+
+This does not mean the gateway eliminates cost. It moves recurring provider-fetch cost out of the agent’s context window and amortizes it across many reads.
+
+---
+
+## Case Results
+
+### Case 1: Cash + earnings + FOMC
+
+Prompt:
+
+> “I have $20k cash. Looking at the next 14 days of earnings plus the FOMC meeting on the 29th, when’s the lowest-vol-risk week to enter a new position?”
+
+The agent composed:
+
+```text
+fin.fomc
+fin.earnings
+fin.insider
+gateway.health
+```
+
+It produced this calendar:
+
+```text
+Apr 25       pre-FOMC overhang              SOFT BLOCK
+Apr 28       pre-FOMC overhang              SOFT BLOCK
+Apr 29       FOMC + MSFT/GOOGL/AMZN/META    HARD BLOCK
+Apr 30       AAPL earnings                  HARD BLOCK
+May 1        post-FOMC / post-AAPL          CLEAR
+May 5        AMD earnings                   HARD BLOCK
+May 6        first fully clean day          CLEAR
+May 7–8      clean through May 12           CLEAR
+```
+
+Result: **enter May 6–8**.
+
+The insider data showed selling, not buying, across the names in the window. There was no insider-buying signal strong enough to override the calendar risk.
+
+---
+
+### Case 2: Cash + watched X accounts + FOMC
+
+Prompt:
+
+> “I have $20k cash and the FOMC is meeting on April 29. What are the people I follow on X actually saying about the Fed right now, and given the watched accounts’ sentiment plus the earnings cluster around the FOMC date, should I deploy this week or wait?”
+
+The agent composed:
+
+```text
+x.watched
+fin.fomc
+fin.earnings
+gateway.health
+```
+
+Result: **wait; deploy at most $5k now**.
+
+The useful finding was a null result: of 22 recent watched posts, none were about the Fed. The macro accounts in the watchlist were not flagging a near-term macro turn.
+
+Combined with the April 29 FOMC meeting and the mega-cap earnings cluster, the agent recommended keeping most cash optionality.
+
+The test also exposed an upstream data-quality issue: 18 of 22 watched posts came from one author. That is not a gateway problem; it is a watchlist curation problem.
+
+---
+
+### Case 3: Cash + X bookmarks + insider Form 4
+
+Prompt:
+
+> “Of the stocks I’ve been bookmarking on X over the past two weeks, which ones also have informed-money signals — meaning recent insider buying, not selling, from officers or directors? Should any justify deploying $20k?”
+
+The agent composed:
+
+```text
+x.bookmarks
+fin.insider
+gateway.health
+```
+
+Result: **hold capital**.
+
+Both filters returned empty:
+
+```text
+30 recent bookmarks: zero public ticker mentions
+25 recent Form 4 filings: zero insider buys
+search("BUY", source="fin.insider", since="2026-04-11"): []
+```
+
+This was a useful negative result. The agent did not force a connection between bookmarked AI/agent-engineering content and a tradeable ticker.
+
+The important gateway behavior here was that an empty `search()` result was meaningful. In a raw-tool setup, “I found nothing” is hard to distinguish from “I searched badly.” With the gateway, the empty set was produced by the same retrieval grammar used everywhere else.
+
+---
+
+### Case 4: AI research/releases + FOMC + earnings
+
+Prompt:
+
+> “Looking at AI model releases and research papers from Anthropic, OpenAI, and major GitHub repos in the past 30 days, plus the FOMC on April 29 and earnings from any close competitors, where’s the cleanest 3-day window in the next 14 days to deploy my $20k into an AI-momentum trade without overlapping a volatility event?”
+
+The agent composed:
+
+```text
+anthropic.research
+openai.research
+github.releases
+fin.fomc
+fin.earnings
+gateway.health
+```
+
+It produced:
+
+```text
+Apr 21–23    AI releases and research already landed
+Apr 28–30    pre-FOMC / FOMC / AAPL earnings       BLOCKED
+May 1        post-FOMC tail                        CAUTION
+May 4        pre-AMD drift                         CAUTION
+May 5        AMD earnings                          BLOCKED
+May 6–8      cleanest 3-day window                 CLEAR
+```
+
+Result: **enter May 6–8**.
+
+This converged with Case 1, but through a different path. Case 1 used calendar primitives directly. Case 4 added research and release momentum, then reached the same clean window.
+
+That is a useful validation of the source model: different question framings can compose different sources and still converge when the underlying events agree.
+
+---
+
+### Case 5: Cross-platform bookmarks + insider + filings
+
+Prompt:
+
+> “Looking at everything I’ve bookmarked across X and Xiaohongshu in the past month, what implicit investment thesis am I building? Does the smart-money flow confirm or contradict that thesis enough to justify deploying $20k?”
+
+The agent composed:
+
+```text
+x.bookmarks
+xhs.bookmarks
+fin.insider
+fin.filings
+gateway.health
+```
+
+Result: **hold capital**.
+
+The bookmarks showed a builder thesis, not an investor thesis.
+
+Top themes:
+
+```text
+~70%   agent / LLM tooling
+~10%   personal-knowledge infrastructure
+~20%   lifestyle / career logistics
+```
+
+The smart-money flow did not confirm a buy thesis. Insider activity was dominated by selling, and filings were routine quarterly disclosures.
+
+Conclusion: the bookmarks suggested investing in tools, compute, and personal workflow, not buying a public equity position. Mapping the bookmarks onto GOOGL, META, AMZN, or another large-cap AI name would have been fabricated signal.
+
+---
+
+## Baseline: Raw Tool Exposure
+
+Before the capability gateway, the natural approach was to expose each provider as a separate tool:
+
+- one tool for earnings
+- one tool for FOMC or macro calendar events
+- one tool for SEC filings
+- one tool for insider Form 4s
+- one tool for GitHub releases
+- one tool for X posts and bookmarks
+- one tool for research feeds
+- one tool for local indexed state
+- one tool for source health or debugging
+
+This works for simple demos but degrades in real use.
 
 With raw tools, the agent has to infer:
 
-- which APIs exist
+- which tools exist
 - which credentials are configured
-- which sources are stale
-- which calls are safe
+- which tools are stale
+- which tools are safe
 - which calls mutate state
 - which errors are retryable
-- which data shapes are equivalent
-- which result is canonical
-- which source should be trusted more
+- which schemas are equivalent
+- which source should be trusted
+- which provider-specific result needs resolving
 
-That is a lot of implicit contract.
+The capability gateway changes the workflow:
 
-Capability mediation moves those assumptions into infrastructure.
+1. discover available sources through `gateway.health`
+2. pull recent items using the same grammar
+3. search or resolve only when needed
+4. treat missing credentials and stubbed sources as explicit state
+5. compose across sources using the shared `Item` envelope
 
-Instead of exposing "brokerage API," the gateway exposes bounded financial read capabilities.
-
-Instead of exposing "GitHub token," it exposes scoped repository activity.
-
-Instead of exposing "database query," it exposes source-specific retrieval over a uniform item shape.
-
-Instead of letting an agent discover failure through stack traces, it gives the agent a health and availability surface.
-
-The distinction is subtle but important:
-
-> A tool is an affordance.  
-> A capability is an affordance plus boundary, state, policy, and observability.
-
-For personal agents, that boundary matters.
-
----
-
-## The scope grammar
-
-The system uses scope strings to control what an agent can see or do.
-
-The exact grammar is still evolving, but the idea is simple:
-
-```text
-read:source.fin.earnings
-read:source.fin.fomc
-read:source.fin.insider
-read:source.x.watched
-read:source.gateway.health
-subscribe:source.fin.insider
-```
-
-Wildcards are segment-boundary only. `read:source.fin.*` is valid. `read:source.fin*` is not — that would over-grant against `source.finch.x`.
-
-Scopes are not just auth decorations. They are part of the agent contract.
-
-A source may exist, but not be visible to an agent.
-
-A resource may be resolvable, but not subscribable.
-
-A source may allow `recent` but not `fresh_pull`.
-
-The gateway can answer:
-
-```text
-You may read this.
-You may not refresh this.
-This exists but is not configured.
-This source is stubbed.
-This source is live.
-This source is stale.
-```
-
-That gives the agent something much better than binary success/failure.
-
-It gives it a map of its own permissions.
-
-That matters because agents are very good at proceeding confidently when they should instead ask, refresh, degrade, or stop.
+| Dimension | Raw Tools | Capability Gateway |
+|---|---|---|
+| Source discovery | Manual / prompt-based | `gateway.health` |
+| Data shape | Provider-specific | Shared `Item` envelope |
+| Error handling | Provider-specific exceptions | `available=false` + `reason` |
+| Authorization | Tool-level access | Scope-level capabilities |
+| Cross-source composition | Custom glue | Same retrieval grammar |
+| Agent planning load | High | Lower |
+| Partial failure behavior | Opaque | Legible |
 
 ---
 
-## What surprised me
+## Cross-Case Findings
 
-The first surprise was how much value came from boring uniformity.
+### 1. Null results became useful
 
-I expected the hard part to be adding sources.
+Three of five cases recommended holding capital.
 
-It was not.
+That is important because the agent was not merely finding reasons to act. It was able to say: the data does not justify deployment.
 
-The hard part was making sources feel the same enough that agents could compose them without custom glue.
-
-Once everything looked like an `Item`, the agent stopped caring where things came from. That was the point.
-
-The second surprise was that `gateway.health` became a first-class source.
-
-Originally, health was for me. A debugging endpoint. Something I would inspect when the system broke.
-
-But agents used it as part of planning.
-
-They would check which sources were available, notice missing credentials, detect newly registered sources, and route around unavailable ones.
-
-That changed my view of observability.
-
-For agentic systems, observability is not only for humans after failure. It is runtime context for the agent before and during action.
-
-The third surprise was that "stubbed" sources are better than absent sources.
-
-A missing source makes the agent guess.
-
-A stubbed source lets the system say:
+The strongest example was Case 3:
 
 ```text
-This source is conceptually part of the world, but it is not configured yet.
+x.bookmarks: no tickers
+fin.insider: no insider buys
+search("BUY"): []
 ```
 
-That is much easier for both the agent and the human operator to reason about.
+In a raw-tool environment, this kind of negative result is fragile. The user cannot easily tell whether the agent found no signal or failed to search properly.
 
-It turns absence into state.
+With the gateway, null results are first-class. Empty lists, unavailable sources, and credential gaps are represented as state.
 
-The fourth surprise was the cost gap. I expected the gateway to be cleaner. I did not expect it to be 5–7× cheaper in agent-context tokens — and effectively free on the external-API side, because the cron amortizes that cost across every read.
+### 2. Token savings were consistent but not uniform
+
+The gateway reduced agent-context tokens by about **3× to 12×**, depending on the task.
+
+The largest gains came from heavy payloads:
+
+```text
+research paper HTML
+Form 4 XML
+EDGAR filings
+expanded X timelines
+GitHub release bodies
+```
+
+The smallest gains came from social-only tasks where the native payloads were already short.
+
+The average reduction across the five cases was roughly **5–7×**.
+
+### 3. The gateway reduced structural work, not semantic work
+
+The gateway made source access easier. It did not eliminate the model’s reasoning burden.
+
+Case 2 was the hardest because it required a qualitative-on-quantitative join:
+
+```text
+watched-account sentiment
+absence of Fed discussion
+FOMC timing
+mega-cap earnings cluster
+capital deployment decision
+```
+
+The `Item` envelope made the structural join simple. The semantic join was still the model’s job.
+
+This is the right boundary. The gateway should reduce API and schema friction, not pretend to replace reasoning.
+
+### 4. Independent paths converged
+
+Case 1 and Case 4 both recommended May 6–8.
+
+They reached that conclusion differently:
+
+```text
+Case 1: FOMC + earnings + insider activity
+Case 4: AI releases + research + FOMC + earnings
+```
+
+This was a useful signal that the gateway was not forcing one hardcoded workflow. Different sources and prompts could converge on the same answer through the same retrieval grammar.
+
+### 5. Diagnostics became runtime context
+
+`gateway.health` started as a human debugging endpoint. In practice, agents used it for planning.
+
+They could check which sources were live, which were stubbed, which were stale, and which had missing credentials.
+
+For agentic systems, observability is not only for humans after failure. It is operational context for agents before and during action.
 
 ---
 
-## What this is not
+## Token and API Cost Analysis
 
-This is not a trading system.
+The gateway saves tokens mainly by moving normalization and provider fetching upstream.
 
-This is not an autonomous financial advisor.
+Without the gateway, the agent pays for provider data inside the context window on every query. With the gateway, scheduled jobs fetch and normalize source data once, then the agent reads compact snapshots.
 
-This is not a claim that agents should be allowed to execute high-risk actions just because they can read high-value state.
+### Agent-context cost
 
-The current system is intentionally biased toward read, summarize, compare, and explain.
+The largest per-query costs in the native path were:
 
-It is not optimized for autonomous execution.
+#### 1. Raw payload size
 
-That distinction matters.
+A research post can be tens of thousands of characters. A Form 4 XML file can be several KB. An expanded X timeline can become tens of thousands of tokens.
 
-A personal agent that can read private context is already useful. A personal agent that can mutate private state needs a much harder control plane: approvals, budgets, audit trails, rollback semantics, rate limits, and probably separate execution identities.
+The gateway caps heavy fields at 2,000 characters and marks them with `_truncated: true`.
+
+#### 2. Tool-definition size
+
+Native access requires separate schemas for X, EDGAR, OpenBB, GitHub, scraping tools, and local stores.
+
+The gateway exposes one shared retrieval grammar and one shared item shape.
+
+#### 3. Planning overhead
+
+With native tools, the agent must decide which provider tool to use and how to parse its schema.
+
+With the gateway, the main decision is source selection:
+
+```text
+recent("fin.earnings", n=20)
+search("BUY", source="fin.insider")
+resolve("source://...")
+```
+
+### External API cost
+
+The gateway does not make provider cost disappear. It amortizes provider cost.
+
+Without the gateway, every agent query can hit external APIs directly:
+
+```text
+X API
+SEC EDGAR
+GitHub REST
+OpenBB / yfinance
+HTML scrapers
+```
+
+With the gateway, scheduled jobs pull source data once. The agent then reads the normalized snapshot.
+
+Example:
+
+```text
+20 cross-source queries/day × 30 days = 600 queries/month
+Native X path: 3–5 endpoint hits/query = 1,800–3,000 X API calls/month
+Gateway path: cron pulls on schedule; per-query X API calls ≈ 0
+```
+
+The same pattern applies to SEC filings, research scrapes, and GitHub releases.
+
+The agent does not need to see provider rate limits directly. The gateway handles them on a schedule.
+
+If a provider fails, the snapshot can still serve stale data while `gateway.health` exposes how stale the source is.
+
+---
+
+## Failure Cases and Friction
+
+The gateway did not remove agent failure. It changed the shape of failure.
+
+### 1. Some `recent()` calls still returned too much
+
+Problem examples:
+
+```text
+recent("x.bookmarks", n=25)
+recent("github.releases", n=15)
+```
+
+These sometimes exceeded the per-tool-result token cap and forced a fallback read from a saved file.
+
+Proposed fix:
+
+```text
+recent(source, n, fields=["title", "summary", "author", "created_at"])
+```
+
+Field projection would let agents skip `content.raw` unless they need it.
+
+### 2. `fin.insider` needs richer filters
+
+Several cases scanned insider filings only to discover they were all sales.
+
+Proposed fix:
+
+```text
+recent("fin.insider", n=25, direction="BUY")
+```
+
+or:
+
+```text
+search(source="fin.insider", query="BUY", since="2026-04-11", fields=["ticker", "insider", "direction", "value"])
+```
+
+This would reduce token usage and planning overhead.
+
+### 3. Health checks can become repetitive
+
+Some agents over-called `gateway.health` before small tasks.
+
+This suggests health state should be cached at the session level or summarized as part of the agent’s working context.
+
+### 4. Source-specific semantics still leak
+
+The `Item` envelope helps, but it does not erase domain differences.
+
+Earnings events, filings, social posts, and research papers still require different interpretation.
+
+The envelope reduces structural glue. It does not remove the need for domain reasoning.
+
+### 5. Read-only workflows are much easier than execution workflows
+
+The system works best for read, summarize, compare, and explain.
+
+Mutating private state would require a stricter execution control plane:
+
+- approvals
+- budgets
+- audit trails
+- dry-run previews
+- rollback semantics
+- rate limits
+- separate execution identities
 
 Capability mediation is a prerequisite for that world, not the whole answer.
 
 ---
 
-## The security shape
+## Security Shape
 
 The gateway is not secure because it is small.
 
-It is secure because the sensitive operations are made explicit.
+It is safer because sensitive operations are made explicit.
 
-The design tries to avoid giving agents broad ambient authority.
+The design avoids giving agents broad ambient authority.
 
-Instead of "here is a token," the agent receives scoped access to specific capabilities.
+Instead of:
 
-Instead of "here is a database," the agent receives `recent`, `search`, `resolve`, and `fresh_pull`.
+```text
+Here is a brokerage token.
+```
 
-Instead of "here is every account," the agent receives only sources its scope allows.
+the agent receives scoped access to specific capabilities.
 
-Instead of "call anything," it gets a small grammar.
+Instead of:
 
-This is not enough for a production system. But it points in the right direction.
+```text
+Here is a database.
+```
+
+the agent receives:
+
+```text
+recent
+search
+resolve
+fresh_pull
+resources/read
+resources/subscribe
+```
+
+Instead of:
+
+```text
+Call anything.
+```
+
+the agent gets a small grammar over scoped sources.
 
 The security model I want is less like:
 
-> "Can this agent use the brokerage tool?"
+> “Can this agent use the brokerage tool?”
 
-And more like:
+and more like:
 
-> "Can this agent read position summaries from this source, resolve historical filing items, and subscribe to future filing updates — but not place orders, move money, or reveal raw credentials?"
+> “Can this agent read position summaries from this source, resolve historical filing items, and subscribe to future filing updates — but not place orders, move money, or reveal raw credentials?”
 
-That is the level where personal agent permissions start to feel real.
+That is the level where personal-agent permissions start to feel real.
 
 ---
 
-## Why MCP is a good fit
+## Why MCP Was a Good Fit
 
-MCP is useful here because it gives the gateway a standard way to expose tools and resources without making every source a bespoke integration.
+MCP was useful because it gave the gateway a standard way to expose tools and resources without making every source a bespoke integration.
 
-But the important part is not "we used MCP."
+But the important part was not “we used MCP.”
 
-The important part is what MCP makes natural:
+The important part was what MCP made natural:
 
 - tools for bounded actions
 - resources for addressable state
@@ -379,53 +799,92 @@ The important part is what MCP makes natural:
 - a place to enforce policy
 - a place to normalize source behavior
 
-The gateway is not just an adapter. It is a mediation layer.
-
-That is the difference.
+The gateway is not just an adapter.
 
 An adapter says:
 
-> "Here is the API in another shape."
+> “Here is the API in another shape.”
 
 A mediation layer says:
 
-> "Here is the capability you are allowed to exercise."
+> “Here is the capability you are allowed to exercise.”
 
 ---
 
-## The bigger pattern
+## What the Evaluation Supports
 
-This project has made me think that a lot of personal-agent infrastructure should be built around three surfaces:
+The five test cases support a narrower claim than “the gateway makes agents smarter.”
 
-1. **Capability surface** — what the agent can do.
-2. **State surface** — what the agent can observe.
-3. **Diagnostic surface** — what the agent can know about the system itself.
+The better claim is:
 
-Most systems expose the first one badly, the second one inconsistently, and the third one only to humans.
+> A capability-mediated gateway reduces structural friction for personal agents operating over multi-source private state.
 
-Agents need all three.
+More specifically:
 
-They need to know not just the task, but the operating condition.
+```text
+It reduced agent-context tokens by about 5–7×.
+It made null results easier to trust.
+It allowed different sources to compose through one retrieval grammar.
+It moved provider API cost into scheduled snapshots.
+It exposed source health as agent-readable state.
+It surfaced concrete interface improvements.
+```
 
-They need to know what is fresh, what is stale, what is blocked, what is stubbed, what is live, and what they are allowed to touch.
+The gateway did not remove the need for reasoning.
 
-Otherwise, every agent becomes a confident intern wandering through a dark server room with a root token.
+It made the environment less noisy, less schema-dependent, and easier to inspect.
 
-That is not the future I want.
+That is the result.
 
 ---
 
-## What comes next
+## Limitations
 
-The next version needs better policy and better memory.
+This experiment has obvious limits.
 
-Policy, because scopes need to become more expressive. Some capabilities should be time-bound. Some should require approval above a threshold. Some should be read-only except during explicitly delegated sessions. Some should expose summaries but not raw records.
+It was run by one user, on one local deployment, with a small set of trusted personal agents. The tasks were practical but not statistically controlled. The source set reflects workflows I personally care about: finance monitoring, research tracking, social bookmarks, source health, and development activity.
 
-Memory, because agents should remember source behavior over time. Not just "this source exists," but "this source is often stale," "this source usually needs refresh," "this source is safe for planning but not execution," and "this source failed yesterday because credentials were missing."
+The native-token estimates are approximate. They are based on equivalent provider calls, raw payload sizes, and schema overhead, not a controlled benchmark harness.
 
-The gateway should also expose better provenance.
+The system is biased toward read-heavy workflows and does not test autonomous high-risk execution.
 
-When an agent answers from three sources, the answer should carry source lineage naturally:
+The results should be read as a field report, not a benchmark.
+
+The claim is not that this gateway architecture is universally optimal. The narrower claim is:
+
+> For personal agents operating over private and partially available state, a capability-mediated gateway made the system easier to inspect, safer to expose, and easier for agents to compose across sources.
+
+---
+
+## Future Work
+
+The next iteration should focus on six areas.
+
+### 1. Field projection
+
+Add projection to `recent()` and `search()`:
+
+```text
+recent(source, n, fields=["title", "summary", "created_at"])
+```
+
+This would reduce bulky results and avoid fallback reads.
+
+### 2. Richer source filters
+
+Add domain-specific filters where they reduce obvious waste:
+
+```text
+recent("fin.insider", n=25, direction="BUY")
+```
+
+The gateway should stay uniform, but not so generic that agents waste calls scanning irrelevant records.
+
+### 3. Provenance
+
+Answers should carry source lineage by default.
+
+A cross-source answer should make clear which sources contributed to which part of the conclusion:
 
 ```text
 This conclusion came from:
@@ -435,23 +894,40 @@ This conclusion came from:
 - gateway health state
 ```
 
-Not as an afterthought. As part of the result.
+### 4. Session-level health memory
 
-Eventually, I want agents to operate with something like a personal capability graph: a live map of what they can observe, what they can do, what requires approval, and what is currently broken.
+Agents should not need to call `gateway.health` repeatedly.
 
-That feels like the right abstraction.
+Health state should be cached, summarized, and refreshed only when necessary.
 
-Not tools.
+### 5. Failure taxonomy
 
-Not plugins.
+Source failures should be grouped into consistent categories:
 
-Not one giant assistant with everything wired in.
+```text
+missing_credentials
+stale_sync
+provider_failure
+malformed_adapter_output
+authorization_denied
+unsupported_capability
+```
 
-A mediated capability layer between agent reasoning and personal state.
+### 6. Execution control plane
+
+Read workflows are useful, but write workflows require stronger controls:
+
+- approvals
+- budgets
+- audit logs
+- dry-run previews
+- rate limits
+- rollback semantics
+- separate execution identities
 
 ---
 
-## Closing thought
+## Closing Thought
 
 The most interesting part of this experiment is not that an agent answered a finance question.
 
@@ -461,12 +937,12 @@ The gateway did not make the agent smarter.
 
 It made the world less chaotic.
 
-That may be the real job of personal-agent infrastructure: not to replace reasoning, but to shape the environment so reasoning has something stable to stand on.
-
 ---
 
 ## References
 
 - **Public gateway:** [github.com/lockezhou18/mcp-data-gateway](https://github.com/lockezhou18/mcp-data-gateway) — MIT-licensed, pip-installable. Includes a zero-credential Hacker News example source, launchd template, and `docs/{ARCHITECTURE,EXTENDING,AUTH}.md`. The version under my desk is a private extension of this base.
-- **Model Context Protocol spec:** [modelcontextprotocol.io](https://modelcontextprotocol.io/) — the open standard the gateway implements. Streamable HTTP and stdio transports; tools, resources, and subscriptions.
-- **Anthropic announcement:** [Introducing the Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) (Nov 25, 2024) — Anthropic's open-sourcing of MCP. Useful framing for *why* a standard for connecting AI applications to data sources exists.
+- **Model Context Protocol spec:** [modelcontextprotocol.io](https://modelcontextprotocol.io/) — the open standard the gateway implements. Streamable HTTP and stdio transports; tools, resources, and subscriptions. The gateway targets protocol revision `2025-11-25`.
+- **Anthropic announcement:** [Introducing the Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) (Nov 25, 2024) — Anthropic's open-sourcing of MCP. Useful framing for *why* a standard for connecting AI applications to data sources exists, and the design constraints that shaped the wire protocol.
+
+That may be the real job of personal-agent infrastructure: not to replace reasoning, but to shape the environment so reasoning has something stable to stand on.
