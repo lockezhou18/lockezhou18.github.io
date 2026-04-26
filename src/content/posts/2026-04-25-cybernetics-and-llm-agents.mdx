@@ -1,0 +1,73 @@
+---
+title: "Engineering Cybernetics for LLM Agents: A Literature Review"
+date: 2026-04-25T12:00:00-07:00
+description: "Ten parallel research agents, 338+ academic sources, ~850K characters of analysis. Wiener, Ashby, Beer, Tsien, von Foerster — and an open research space between classical cybernetics and LLM agent design."
+---
+
+This is the long-form companion to a [separate post on what we have running](/2026-04-25-v0-personal-computer/) — what runs when we say "a personal computer that knows me." That post lists the inventory. This one is the literature review behind it: where the design choices come from, why we trust them, and what surprised us when we went looking.
+
+If you're building agentic systems and the design feels like it has theorems behind it that nobody is naming, this is for you.
+
+## Why we ran the survey
+
+On 2026-04-15 we sat with a question: *engineering cybernetics may be the right lens for agentic systems — agents are probabilistic, the world is noisy, and the goal is stable progress through feedback and control.* The instinct was strong, but the literature was unclear.
+
+We answered it by running ten parallel research agents — Wiener+Ashby foundations, Beer's VSM, second-order cybernetics, Tsien's Chinese school, modern AI × control theory, harness engineering for probabilistic agents, plus a broad academic survey. Three hundred thirty-eight academic sources. Roughly 850K characters of analysis. The full synthesis is private (`claude-knowledge/docs/cybernetics/SYNTHESIS.md`); this post is the public summary.
+
+What we found was not what we expected.
+
+## The lay of the land
+
+**Wiener (1948), Ashby (1956)** — the mathematical core. Ashby's *Requisite Variety* (`V(E) ≥ V(D) − V(R)`, "only variety can destroy variety") is the constraint that decides what is regulable in principle. An agent with 5 tools cannot regulate an environment with 1000 distinguishable states; either the environment must be attenuated or the agent's response repertoire amplified. Knowledge briefings, search indexes, pre-compiled context are *attenuators*. Skills, tools, multi-agent coordination are *amplifiers*. Ashby's *Ultrastability* — two levels of feedback, with random reorganization at Level 2 when Level 1 fails — is the architecture for *the LLM explores, the harness crystallizes*. The probabilistic core stays probabilistic; proven patterns harden into a deterministic shell.
+
+**Conant + Ashby (1970)** — *Every good regulator of a system must be a model of that system.* The eval system has to contain a model of the agent it evaluates. There is no shortcut. Combined with Gödel: a sufficiently complex system cannot fully model itself, so the design has to be robust to incomplete self-knowledge — productive despite the gap, not dependent on closing it.
+
+**Beer (1972, 1979)** — the Viable System Model. S1 (operations), S2 (coordination), S3 (internal control), S3* (audit), S4 (intelligence), S5 (identity), plus algedonic alarms that bypass the hierarchy. Maps onto an agent ecosystem cleanly: skills are S1, task routing is S2, the eval system is S3, integration tests and ground-truth probes are S3*, the research pipeline is S4, the constitution and memory index are S5. Beer's *POSIWID* — *the purpose of a system is what it does* — is the cleanest diagnostic tool we know. If an agent claims to learn but its behavior doesn't measurably change, its purpose is not learning, regardless of what the architecture says.
+
+**Tsien Hsue-shen (1954, 1992)** — *Engineering Cybernetics* extended Wiener: how to design feedback controllers for systems whose properties are largely unknown. *Meta-synthesis* (综合集成法) addresses *open complex giant systems* — simultaneously open to environment, internally complex, and too large for exhaustive analysis. A self-improving multi-agent ecosystem is an open complex giant system by definition. Tsien's prescription is structured human-machine collaboration where neither side dominates — the posture our constitution names. A 2025 paper (Wang, Li, He, Fan et al.) explicitly maps Tsien's *Hall for Workshop of Metasynthetic Engineering* onto AI agent architectures; the field is catching up to what Tsien articulated in 1992.
+
+**von Foerster, Maturana + Varela (1970s, 1980s)** — second-order cybernetics, the cybernetics of observing systems. *Eigenforms* are patterns that survive recursive self-application. Engineering principles, the constitution, the memory index — these are eigenforms in the strict sense: applying the improvement process to the improvement process should regenerate the same improvement process, not collapse it. *Autopoiesis*: a viable self-modifying system is *organizationally closed but structurally open* — the organization (principles, evaluation criteria) is the invariant; structure (skills, knowledge entries) changes freely. This is the constraint that protects against drift.
+
+**Bateson (1972)** — levels of learning. Learning 0 = fixed responses. Learning I = corrections within a frame (most RLHF). Learning II = learning the *pattern* of what makes corrections stick (compound learning, in current vocabulary). Learning III = changing the principles that govern how you learn — rare, dangerous, requires the human in the loop. Most "agent improvement" work today is Learning I. Compound Evolution targets Learning II.
+
+**Recent (2025).** Three papers worth flagging for anyone wading in:
+
+- **Tacheny** — agent loops have three dynamical regimes (contractive, oscillatory, exploratory), and prompt design alone selects which.
+- **Tiwari (EILS framework)** — curiosity, stress, and confidence as homeostatic signals; literal cybernetic regulation of agent learning.
+- **Wang / Li / He / Fan** — Tsien's *Hall for Workshop of Metasynthetic Engineering*, mapped onto multi-agent architecture.
+
+## The gap
+
+Across all 338 sources, the literature is rich on cybernetics and rich on LLM agents, but the *intersection* is almost empty.
+
+ArXiv searches during the survey for *"cybernetics + LLM agents,"* *"requisite variety + agent design,"* and *"good regulator theorem + AI"* all returned zero results. There is no formal PID controller for agents. No Lyapunov stability proof for knowledge scoring. The applied vocabulary is missing.
+
+This isn't a complaint. It's an opportunity flag. The classical theory is sitting unused in plain sight, and the agentic-systems community is independently rediscovering pieces of it under new names — *self-reflection*, *outcome scoring*, *world models*, *retrieval-augmented memory*. The same ideas, rederived without the prior art's vocabulary or constraints.
+
+## What we took from it
+
+The architecture we converged on, before we read most of this, names theorems we hadn't read. That's not a humble brag — it's the actual signal that the theory is load-bearing.
+
+- The *probabilistic core / deterministic shell* split (which we'd been calling "skills crystallize from repeated agent use") is **Ashby's Ultrastability** with the names changed.
+- The eval system's requirement to model the agent it evaluates is **Conant + Ashby's Good Regulator Theorem**, full stop.
+- The S1–S5 layering of skills / coordination / eval / audit / research / constitution is **Beer's VSM** at one-to-one resolution.
+- The "knowledge graduates after 3+ uses with positive outcome" rule is variety attenuation crystallizing into the deterministic shell.
+- The constitution's "agents are board members, not tools" is **Tsien's meta-synthesis** — qualitative human judgment + quantitative machine computation, neither dominant.
+
+The point of naming these isn't retrospective. It's prospective. The theory tells us things about the system we haven't seen yet, and gives us vocabulary to reason about problems that are currently invisible.
+
+## What this review did not cover
+
+Three areas this survey did not deeply address, that anyone working in this space should also read alongside:
+
+- **Modern reinforcement learning's connection to control theory** — Sutton & Barto already do this beautifully; we didn't re-cover ground they hold.
+- **Active inference / Free Energy Principle (Friston)** — overlapping methodology, distinct vocabulary; worth a parallel survey.
+- **Predictive processing in computational neuroscience** — likely the next bridge between cybernetics and modern agent design.
+
+## Closing
+
+We aren't claiming to close the gap. We are claiming the gap is real, the classical theory is load-bearing, and anyone designing agentic systems is doing applied cybernetics whether they know it or not.
+
+If you've worked across this intersection — or solved a related problem in a way we haven't seen — issues, pull requests, and email all welcome. The ten-agent SYNTHESIS itself is private for now, but we're happy to share excerpts with anyone working in adjacent territory.
+
+For the inventory of the system that prompted this survey: [What we have running, and what we don't yet](/2026-04-25-v0-personal-computer/).
