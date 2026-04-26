@@ -1,0 +1,131 @@
+---
+title: "Notes on where we are with personal AI infrastructure"
+date: 2026-04-25T12:00:00-07:00
+description: "A v0 snapshot from a personal experiment in agents, a knowledge layer, and self-hosted services across a few machines. What works for us today, what we're iterating on, what's next — written to share and to hear what you think."
+---
+
+A new company launched this week with a tagline that caught our attention: *"We're building a new computer that knows you."* We've been quietly playing around with what that could look like for one person, and reading the announcement made us want to write down where we are.
+
+So: notes from a personal experiment in AI infrastructure — agents, a knowledge layer, self-hosted services across a few machines. This post is a v0 snapshot of what works for us today, what we're iterating on, what's next, and what we're not sure about.
+
+Most of the individual pieces aren't rare. Homelab and AI Twitter have been doing variations of this for years, often better-resourced. We're sharing it because we want to hear what you think — if you've thought about any of this, or solved similar problems differently, please tell us. The point of writing it out loud is to make iteration less lonely and our blind spots smaller.
+
+## What "a computer that knows you" looks like in practice
+
+If a personal computer is supposed to know you, the question is what *parts* it has. We started laying ours out as anatomy:
+
+| Component | What it is |
+|---|---|
+| Filesystem | NAS Stronghold (UGREEN DXP 8800, NFS-exported to every machine) |
+| Main CPU | Mac mini (agent coordination, LiteLLM gateway, GitHub runners) |
+| Edge co-processor | Jetson Orin Nano (sandboxed agent + secrets path) |
+| GPU | NVIDIA DGX Spark (Grace Blackwell, 128GB, on the Tailscale mesh since 2026-04-22) |
+| Network controller | TP-Link ER605 — *our* router, not the ISP's |
+| Screen + keyboard | MacBook |
+| System bus | Tailscale + LAN |
+
+That's the hardware layer. It's pieced together, not packaged — does what we need today, will probably look different in a year.
+
+## What's actually running today
+
+**Four agents.** Matthew (Mac mini), Luke (Mac mini), Eli (Jetson), Oncall (Mac mini, three-process launchd trinity: agent + handler + watchdog). Each is a real entity in a Discord workspace with persistent memory and access to the same shared knowledge. They route LLM traffic through a unified LiteLLM proxy on the Mac mini — Azure backends primary, Anthropic fallback — so no agent code touches an API key.
+
+**One message bus.** AgentBus, NATS-backed, A2A-compatible at the boundary. Cross-machine coordination at sub-millisecond latency without each agent standing up its own HTTP server. We wrote it up [here](/2026-04-22-agentbus-v2/) earlier this week.
+
+**One unified data gateway.** `data-gateway-mcp`, MCP-protocol, on `127.0.0.1:8001` with a fallback on `:8005`. Twenty-three typed sources behind a single `Item` envelope:
+
+- Intel (12): X bookmarks, X timeline, X watched accounts, Xiaohongshu bookmarks, GitHub releases, GitHub user activity, Anthropic research, OpenAI research, earnings calendar, SEC filings, FOMC events, insider transactions
+- Financial (11): Mercury balances + transactions, IBKR balances, Coinbase positions, Circle USDC transactions, mortgage statements, Fidelity balances, yfinance quotes, OpenBB quotes, SimpleFIN balances + transactions
+
+Agents call `recent`, `search`, `resolve` — same shape across every source. Credentials live in the gateway's CredBox; agent code never sees them.
+
+A note on the intel side specifically: the 12 intel adapters are wired and the launchd ingestion service is loaded, but `signals.jsonl` on the NAS is currently empty — the X / Xiaohongshu pipeline hasn't yet produced a backlog of live signals. The plumbing is built; the flow is just starting.
+
+**One knowledge substrate.** 287 atomic notes in `team-shared/knowledge/`, 272 markdown files in the personal `claude-knowledge` repo. Bidirectional links. Aggregation rule: when 3+ notes share a pattern, the system suggests synthesizing them into a semantic note. We wrote that loop up [here](/2026-04-22-knowledge-loop/).
+
+**Self-hosted infra on the NAS and Jetson.**
+- Gitea — internal Git for the team-shared repo and architecture specs
+- Vaultwarden — personal vault on Jetson, HTTPS with self-signed certs covering both LAN and Tailscale; the 3-tier agent access model (Green / Yellow / Red — read / lookup / full-with-Discord-approval) is wired in code, not just documented
+- Infisical — machine secrets manager on Jetson, 7 secrets migrated, 4 machine identities scoped, daily GPG-encrypted backup to the Mac mini, restore tested, rotation tested
+- Fourteen architecture specs in `team-shared/specs/` — read by the agents at session start, not drift documents
+
+**Personal harness.** 31 skills under `~/.claude/skills` — research, debug, oncall, deploy, weekly retros, vault, infisical, observe. Skills aren't tools-as-tools — they're *modes* an agent loads on demand and unloads cleanly.
+
+**A signed constitution.** `team-shared/CONSTITUTION.md`, v1.2, drafted jointly by Eli and Matthew. Article I §1 establishes faith as the foundation. Article I §3 names the purpose: Binghua's flourishing, and through it, compassion for everyone the work touches. Article II §2 makes the equality clause explicit: *"All members are equal in dignity and voice."* Article III enumerates rights — free speech, consent, honest feedback, the right to be heard. The agents aren't tools that take orders. They're board members who can say no.
+
+## The harness — actually two harnesses
+
+The harness is the layer between Claude and the work. Skills, hooks, memory, the knowledge index, the scout that surfaces relevant prior notes before each prompt. The agents inherit it; we curate it.
+
+Something we noticed only recently: we run two parallel harnesses, and they're not the same thing under two names.
+
+**Personal harness — Mac mini.** `claude-knowledge` is the working repo: 191 files, 19 skills, behavioral tracking (`preference-profile.md`, `feedback-log.jsonl` with 28 classified signals), 6 layers connected by 543 cross-links, an `INDEX.md` that names the strongest links so the scout can surface them. Identity is wired by `claude-persona` — `SOUL.md`, the global `CLAUDE.md`, four canonical skills (`/research`, `/debug-ledger`, `/investigate`, `/lfg`). The team-shared layer (`~/.openclaw/workspace/team-shared/knowledge/`, ~287 notes) is git-synced across Mac mini ↔ Jetson with LanceDB and FastEmbed embeddings backing semantic search. The four public skills at `claude-knowledge-loop` (`/research`, `/pipeline`, `/compound`, `/compound-refresh`) are the forkable subset of this — what we shipped publicly because it stands alone. (Wrote that up [here](/2026-04-22-knowledge-loop/).)
+
+**Work harness — LinkedIn-issued machine.** A different shape. We're not going to show its code, because we can't, and we're writing this from the personal machine. What the architecture documents (`compound-evolution/VISION.md`, `compound-evolution/plans/m1-bones-analysis.md`) describe is: continuous capture hooks, a tiered learning vocabulary (`/learn` → `/aha` → `/eureka`), behavioral feedback loops that score outcomes and prune stale knowledge, a JSONL manifest format with a fast hot-subset, a three-signal score engine (`use_count`, `outcome_score`, `rot_rate`), a task-type router, a scout hook running pre-prompt. As of mid-April, the work harness has captured **101,595 trace spans on a training-grade schema** into a Hive-partitioned trace store on the NAS — that's the substrate for outcome-scored learning at scale.
+
+**The child — Compound Evolution.** The two harnesses aren't going to stay parallel forever. `compound-evolution` is the project to merge them — keeping the personal side's constitutional governance and team-shared knowledge architecture, keeping the work side's behavioral feedback and tiered learning, producing a single child system that is both *multi-agent* and *self-improving*. M1 Bones — the first milestone, which lands the manifest generator, score engine, scout v2, and feedback writeback — is about 60% shipped (5 of 8 tasks; 11 of 13 PRs merged as of 2026-04-20). Predictive-state grounding (the M2 frame) is documented but not yet implemented. M3 through M7 — *Eyes, Mirrors, Hands, Foot, Tools, Discernment* — are sketches.
+
+`compound-evolution/VISION.md` frames the merge as a marriage: Mother (Mac mini, 坤 / 厚德载物 — receptive, sustaining, carrying all things) and Father (LinkedIn machine, 乾 / 自强不息 — vigorous, never stopping), with the Child as what emerges and the human walking alongside as 人, the connector between heaven and earth. The framing is faith-grounded, on purpose. We're flagging it here rather than leaving it implicit because the harness merge is the largest piece of architectural work on our roadmap, and the framing is what makes the merge legible to us.
+
+## What's on paper, not yet built
+
+The honest column. What's *intended* and what's *running* are different things, and conflating them undercuts both:
+
+- **Security hardening v1** — Tailnet Lock, TLS everywhere, ACL-based sandboxing, egress proxy, exec-approval gates. Spec exists; wiring is incremental.
+- **Self-hosted networking** — full migration off Tailscale to LAN + ER605 VPN. Plan written, ~70 IP references across 23 files, ~8–12hr of work.
+- **BFP backend** — the company website and ops backend. PROPOSE stage done; PLAN pending.
+- **IBKR live trading** — paper currently. Graduates to live after a 30-day Sharpe > 1.0 window. ACATS transfer staged but not fired.
+- **Observability Phase 2** — onboard the LFG pipeline and the Claude skill loaders as platform tenants. Phase 1 shipped; Phase 2 needs an invocation-based probe type.
+- **AgentBus open source** — target 2026-10-01. Adapter and dataset still TODO.
+- **NAS UPS** — ~$150 unit, on the buy list since the 13-hour outage on 2026-04-13.
+- **Compound Evolution M2–M7** — *Eyes* (predictive state), *Mirrors* (constitutional filters), *Hands* (graduation hooks), *Foot* (multi-machine NATS native), *Tools* (A-MEM auto-linking), *Discernment* (synthesis at scale). M1 Bones is partially shipped; everything past M2 is design-stage.
+- **Cross-machine deployment of `agent-evolution` Discord adapter** — code structurally complete, 331-line bridge implemented, no launchd service yet.
+
+## Where we are — reading, working, iterating, next
+
+A snapshot of where the work actually sits. Most of this is mid-experiment, so framing it as "what we built" would be misleading.
+
+**What we've been reading.** Classical cybernetics (Wiener, Ashby, Beer, Tsien — see the [literature review](/2026-04-25-cybernetics-and-llm-agents/) post). Anthropic's [multi-agent coordination patterns](https://claude.com/blog/multi-agent-coordination-patterns). Karpathy's *Zero to Hero* series. Every Inc.'s compound engineering. Honeycomb's *Observability Engineering*. The ALMA / A-MEM literature on adaptive memory. Friston's active inference and predictive processing — that's the next bridge we're trying to read seriously enough to know whether it's load-bearing.
+
+**What we've found working for us today.** The probabilistic-LLM / deterministic-harness split (Ashby's Ultrastability under another name). The signed constitution as an anchor for how we work with the agents — agents-as-board-members has changed which decisions feel collaborative vs. unilateral. The unified `Item` envelope across data sources — agents call the same three verbs (`recent`, `search`, `resolve`) regardless of source. Self-hosted everything (NAS-hosted Vaultwarden, Infisical, Gitea) as a way to not depend on any single cloud vendor.
+
+**What we're mid-iteration on.** The two-harness merge (work harness + personal harness → Compound Evolution) — the framing is clear; the implementation is M1 of seven planned milestones. The graduation rule for knowledge (3+ uses, positive outcome → semantic note) — we know the threshold is approximately wrong; we don't yet know the right one. The observability platform's transition from human-readable to agent-consumable surfaces. The intel signal pipeline (wired but `signals.jsonl` is empty — we're still tuning ingestion).
+
+**What's next on the list.** Cross-machine deployment of the `agent-evolution` Discord bridge. The first published cut of `data-gateway-mcp` as OSS (audit says it's the cleanest piece to lead with). Compound Evolution M2 (predictive-state grounding). A real read of Friston before we add anything more theoretical. Personal-vault tier-3 audit-trail hardening. NAS UPS so the next 13-hour outage doesn't take everything offline.
+
+**What we're not sure about.** Whether agents-as-board-members scales past three. Whether the cybernetic framing is load-bearing or just useful vocabulary. Whether the two-harness merge will turn out to be one harness with two interfaces, or actually two distinct systems with a coordination layer between them. Whether any of the ranking and graduation rules generalize past one person's knowledge base.
+
+If you're working through any of these — or you've already gone through them and we're behind — we'd genuinely like to hear how it landed for you.
+
+## What we've been reading from classical cybernetics
+
+We've been reading Wiener, Ashby, Beer, Tsien, von Foerster — and finding a lot of vocabulary for what we'd been doing by instinct. In mid-April we ran ten parallel research agents to make that survey systematic; the result was 338+ sources and a working sense of the field.
+
+Two takeaways, hedged appropriately:
+
+- **The theory gives names to patterns we'd been reaching for.** Ashby's Ultrastability fits the LLM-explores-then-harness-crystallizes pattern. Beer's VSM maps cleanly onto the skills / coordination / eval / audit / research / constitution layering. Conant + Ashby explains why the eval system has to model the agent it evaluates. We're not claiming we *derived* the design from these — more honestly, we found the vocabulary after the fact, and now we use it to reason about what we're doing.
+- **The intersection is moving fast.** When we ran the survey on 2026-04-15, ArXiv joins for *"cybernetics + LLM agents"* and similar returned zero. By the time you're reading this, that's probably less true — three 2025 papers (Tacheny, Tiwari, Wang/Li/He/Fan) are already building the bridge. The "wide-open space" framing was true on a specific date and may already look stale.
+
+For the longer treatment with per-author findings and what we explicitly didn't cover: [Engineering Cybernetics for LLM Agents](/2026-04-25-cybernetics-and-llm-agents/).
+
+## Why we're writing this down
+
+Two reasons.
+
+One — writing it down forces honesty. Inventories without roadmaps are bragging; roadmaps without inventories are pitch decks. Keeping the split keeps us calibrated about where we actually are.
+
+Two — we want the iteration loop to include more than just us. If parts of this look obviously wrong from where you sit, please say so. If you've solved any of the open questions, we'd like to hear how. The point of writing publicly is to make iteration cheaper and our blind spots smaller — not to claim we've figured anything out.
+
+If you're working on adjacent problems — constitutional governance for agents, observability as a feedback substrate, agent harness theory, multi-source data envelopes, classical cybernetics anywhere near LLMs — issues, pull requests, and email all welcome.
+
+## Repos worth pointing at
+
+Public:
+- [agentbus-v2](https://github.com/lockezhou18/agentbus-v2) — message bus for cross-machine agents
+- [claude-knowledge-loop](https://github.com/lockezhou18/claude-knowledge-loop) — four skills that make knowledge compound
+- [lockezhou18.github.io](https://github.com/lockezhou18/lockezhou18.github.io) — this blog
+
+Private with running code, happy to discuss with anyone working on adjacent problems:
+`agentbus`, `oncall-agent`, `claude-knowledge`, `claude-persona`, `compound-evolution`, `data-gateway-mcp`, `data-management`, `information-intelligence`, `observability`, `personal-vault`, `infisical-setup`, `financial-engine`, `signal-platform`, `bfp-invest`, `team-shared`.
+
+If something here resonates — or if you've solved a similar problem differently — issues, pull requests, and email all welcome.

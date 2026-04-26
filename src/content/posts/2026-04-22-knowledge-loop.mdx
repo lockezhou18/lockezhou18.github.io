@@ -8,7 +8,7 @@ Every Claude session starts from zero. You close the window and it's gone — th
 
 We ran into this enough that we built something to address it. Four skills that form a loop: research before you build, build with gates, capture what you learned after, and periodically maintain what you know. Each session feeds the next.
 
-We're sharing it here — [github.com/lockezhou18/claude-knowledge-loop](https://github.com/lockezhou18/claude-knowledge-loop) — in case it's useful to others working the same problem. Happy to hear what you think.
+We're sharing it here — [github.com/lockezhou18/claude-knowledge-loop](https://github.com/lockezhou18/claude-knowledge-loop) — as a v0 of work-in-progress. The four skills below work for us today; they'll change, your mileage will vary, and we're publishing the current state because that's how we find out which parts hold up. Tell us what works, what doesn't, what we're missing.
 
 ## The four skills
 
@@ -22,7 +22,7 @@ We're sharing it here — [github.com/lockezhou18/claude-knowledge-loop](https:/
 
 ## Why it compounds
 
-The reason is the aggregation rule in `/compound`: when 3+ notes share the same pattern, it suggests synthesizing them into a single pattern note. Episodic knowledge (what happened this time) becomes semantic knowledge (what's generally true). After enough sessions, `/research` starts surfacing relevant past work before you'd think to look.
+The mechanism is the aggregation rule in `/compound`: when 3+ notes share the same pattern, it suggests synthesizing them into a single pattern note. Episodic knowledge (what happened this time) becomes semantic knowledge (what's generally true). We noticed this starting to feel useful around 30+ notes for our knowledge base; for smaller bases or different domains, the threshold is probably different — please report back if you try it and the math lands somewhere else.
 
 The knowledge base location is just files on disk — `~/knowledge/notes/`, `~/knowledge/sources/`. No database, no server. Start empty and it fills up naturally.
 
